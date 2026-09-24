@@ -1,0 +1,163 @@
+<!doctype html><html lang=vi><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Phân tích và dự báo giá nhà Hà Nội</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f4f2;color:#1f2925;font-family:"Times New Roman",Times,serif;font-size:15px;line-height:1.55}
+header{background:white;border-bottom:1px solid #ccd2ce}.head{max-width:1250px;margin:auto;padding:18px 25px}.title{font-size:25px;font-weight:bold}.sub{font-size:15px;color:#65706b}
+nav{background:#263b33}.nav{max-width:1250px;margin:auto;display:flex}.nav button{font-family:inherit;font-size:15px;padding:13px 20px;border:0;background:none;color:#dfe7e3;cursor:pointer}.nav button.on{background:#fff;color:#263b33;font-weight:bold}
+main{max-width:1250px;margin:auto;padding:25px}.panel[hidden]{display:none}.card{background:white;border:1px solid #ccd2ce;padding:22px;margin-bottom:20px;border-radius:3px}
+h2{font-size:20px;margin:0 0 8px}h3{font-size:17px;margin:0 0 8px}.note{color:#66736d}.upload{padding:35px;border:2px dashed #aeb9b3;text-align:center;background:#fafbfa}
+button.primary{font:15px "Times New Roman";padding:10px 18px;border:0;background:#263b33;color:white;cursor:pointer}input,select{font:15px "Times New Roman";padding:9px;border:1px solid #bfc9c3;width:100%;margin:4px 0 12px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{background:#f7f8f7;border:1px solid #dce1de;padding:15px}.kpi b{display:block;font-size:24px;margin-top:4px}
+.table-title{text-align:center;font-weight:bold;font-size:15px;margin:18px 0 8px}table{width:100%;border-collapse:collapse;background:white}th,td{border:1px solid #cdd4d0;padding:8px 10px;text-align:left}th{background:#eef1ef;font-weight:bold}.tablewrap{overflow:auto}
+.step{border-left:4px solid #506c60;padding-left:18px;margin:24px 0}.flow{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0}.flow span{background:#eef1ef;border:1px solid #ccd4d0;padding:7px 10px}.arrow{border:0!important;background:none!important}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.result{background:#263b33;color:white;padding:25px}.price{font-size:42px;font-weight:bold}.small{font-size:14px;color:#d2ddd8}
+.metric-table td:nth-child(2){font-weight:bold;text-align:right}.good{color:#275c48}.bad{color:#9a2f28}
+@media(max-width:850px){.grid,.kpis{grid-template-columns:1fr 1fr}.nav{overflow:auto}}@media(max-width:600px){.grid,.kpis{grid-template-columns:1fr}}
+</style><script src="/static/chart.umd.min.js"></script>
+<script>
+let charts=[];
+function hist(vals,bins=22){
+ let mn=Math.min(...vals),mx=Math.max(...vals); if(mx===mn)mx=mn+1;
+ let w=(mx-mn)/bins, c=Array(bins).fill(0), lab=[];
+ vals.forEach(v=>{let i=Math.min(bins-1,Math.floor((v-mn)/w));c[i]++});
+ for(let i=0;i<bins;i++)lab.push((mn+i*w).toFixed(1));
+ return {lab,c}
+}
+function chart(id,type,data,opts={}){let ctx=document.getElementById(id);if(!ctx||typeof Chart==='undefined')return;charts.push(new Chart(ctx,{type,data,options:{responsive:true,plugins:{legend:{display:false}},...opts}}))}
+function medianChart(id,st,label){
+ if(!st)return;
+ charts.push(new Chart(document.getElementById(id),{type:'bar',
+ data:{labels:[label],datasets:[
+  {label:'Khoảng Q1–Q3',data:[[st.q1,st.q3]],barThickness:34},
+  {type:'scatter',label:'Trung vị',data:[{x:st.median,y:label}],pointRadius:7}
+ ]},
+ options:{indexAxis:'y',responsive:true,plugins:{legend:{display:true}},
+ scales:{x:{title:{display:true,text:label}}}}}));
+}
+
+async function renderEDA(){
+ let E=(await api('/api/eda'))||{}; charts.forEach(c=>c.destroy());charts=[];
+ medianChart('priceMedianChart',E.price_stats,'Giá (tỷ VNĐ)');
+ if(E.price_stats)priceStatText.textContent=`Q1: ${fmt(E.price_stats.q1,2)} | Trung vị: ${fmt(E.price_stats.median,2)} | Q3: ${fmt(E.price_stats.q3,2)} | Trung bình: ${fmt(E.price_stats.mean,2)}`;
+ if(E.area_stats){medianChart('areaMedianChart',E.area_stats,'Diện tích (m²)');areaStatText.textContent=`Q1: ${fmt(E.area_stats.q1,2)} | Trung vị: ${fmt(E.area_stats.median,2)} | Q3: ${fmt(E.area_stats.q3,2)} | Trung bình: ${fmt(E.area_stats.mean,2)}`;}
+ let hp=hist((E.price||[]).map(x=>x.Price_ty)); chart('priceChart','bar',{labels:hp.lab,datasets:[{data:hp.c}]});
+ let hl=hist((E.price||[]).map(x=>x.log_Price)); chart('logChart','bar',{labels:hl.lab,datasets:[{data:hl.c}]});
+ if((E.area||[]).length){let ha=hist(E.area.map(x=>x.Area_m2)); chart('areaChart','bar',{labels:ha.lab,datasets:[{data:ha.c}]});}
+ if((E.scatter||[]).length) chart('scatterChart','scatter',{datasets:[{data:E.scatter.map(x=>({x:x.Area_m2,y:x.Price_ty})),pointRadius:2}]},{scales:{x:{title:{display:true,text:'Diện tích (m²)'}},y:{title:{display:true,text:'Giá (tỷ VNĐ)'}}}});
+ let cs=E.corr_columns||[];heatmap.innerHTML='<table><tr><th></th>'+cs.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr>'+cs.map(r=>'<tr><th>'+esc(r)+'</th>'+cs.map(c=>{let v=((E.corr||{})[r]||{})[c]??0,a=Math.abs(v),bg=v>=0?`rgba(46,107,87,${a*.75})`:`rgba(163,47,38,${a*.75})`;return `<td style="background:${bg};text-align:center">${fmt(v,2)}</td>`}).join('')+'</tr>').join('')+'</table>';
+ let D=(E.district||[]).slice(0,15);if(D.length)chart('distChart','bar',{labels:D.map(x=>x.District),datasets:[{data:D.map(x=>x.median_price)}]},{indexAxis:'y'});
+ let T=(E.types||[]);if(T.length)chart('typeChart','bar',{labels:T.map(x=>x.PropertyType),datasets:[{data:T.map(x=>x.median_price)}]},{indexAxis:'y'});
+}
+</script>
+<style>
+#review-table th,#review-table td{border-bottom:1px solid #e5e7eb;padding:7px 9px;text-align:left}
+#review-table td[contenteditable=true]{background:#fffdf2;min-width:100px}
+#review-table td[contenteditable=true]:focus{outline:2px solid #4f46e5;background:#fff}
+.colname{font:inherit;font-weight:700;min-width:120px;padding:5px;border:1px solid #ccc;border-radius:5px}
+.dropcol{display:block;font-size:12px;font-weight:400;margin-top:5px;color:#666}
+.review-tip{padding:7px 10px;margin:5px 0;border-left:3px solid #9ca3af;background:#f8fafc}
+.review-tip.warning{border-left-color:#d97706}.review-tip.ok{border-left-color:#059669}.review-tip.info{border-left-color:#2563eb}
+</style>
+</head><body>
+<header><div class=head><div class=title>Phân tích và dự báo giá nhà tại Hà Nội</div><div class=sub>Mô hình hồi quy tuyến tính đa biến</div></div></header>
+<nav><div class=nav><button class=on data-p=survey>1. Khảo sát dữ liệu</button><button data-p=clean>2. Tiền xử lý & làm sạch</button><button data-p=eda>3. Phân tích khám phá (EDA)</button><button data-p=model>4. Xây dựng mô hình</button><button data-p=result>5. Kết quả mô hình</button><button data-p=predict>6. Dự báo</button></div></nav>
+<main>
+<section id=survey class=panel><div class=card><h2>1. Đọc và khảo sát dữ liệu thô</h2></p><div class=upload><input id=file type=file accept=.csv><button class=primary onclick=upload()>Nạp và xử lý dữ liệu khác</button> <button onclick=resetDefault()>Dùng lại dữ liệu mặc định</button><p id=msg></p></div></div><div id=surveyInfo></div><div id=retentionInfo></div><div id=intelInfo></div>
+<div id="csv-review" class="card" style="display:none;margin-top:18px">
+<h2>Kiểm tra và hiệu chỉnh dữ liệu đầu vào</h2>
+<p class="note">Đây là bước gợi ý trước khi đưa CSV vào mô hình. Hệ thống không tự sửa dữ liệu. Bạn có thể sửa tên cột, sửa ô trong 20 dòng xem trước hoặc đánh dấu bỏ cột. Nếu dữ liệu đã đúng, chỉ cần xác nhận.</p>
+<p id="review-meta"></p>
+<div id="review-suggestions" style="margin:10px 0"></div>
+<div style="overflow:auto;max-height:480px;border:1px solid #ddd;border-radius:8px"><table id="review-table" style="min-width:100%;white-space:nowrap"></table></div>
+<p class="note">Sửa tên/bỏ cột áp dụng cho toàn bộ file; sửa ô chỉ áp dụng cho các dòng đang hiển thị.</p>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="primary" onclick="confirmReview()">Xác nhận và xử lý dữ liệu</button>
+<button onclick="cancelReview()">Bỏ qua tệp này</button>
+<a class="btn" href="/api/pending-csv" target="_blank">Tải CSV đang kiểm tra</a>
+</div>
+</div>
+</section>
+<section id=clean class=panel hidden><div class=card><h2>2. Tiền xử lý dữ liệu (Data Preprocessing)</h2><div class=flow><span>Dữ liệu thô</span><span class=arrow>→</span><span>Loại trùng</span><span class=arrow>→</span><span>Suy luận & chuẩn hóa đơn vị</span><span class=arrow>→</span><span>Missing</span><span class=arrow>→</span><span>IQR k=3</span><span class=arrow>→</span><span>Ngưỡng nghiệp vụ</span><span class=arrow>→</span><span>Đơn giá 10–1500 tr/m²</span><span class=arrow>→</span><span>Dữ liệu sạch</span></div></div><div id=steps></div></section>
+
+<section id=eda class=panel hidden>
+<div class=card><h2>3. Phân tích khám phá dữ liệu (EDA)</h2><p class=note>Các biểu đồ được sinh lại từ tập dữ liệu sạch sau mỗi lần upload, theo hướng trình bày trong notebook.</p></div>
+<div class=grid>
+ <div class=card><h3>Biểu đồ Phân bố giá nhà</h3><canvas id=priceChart height=220></canvas></div>
+ <div class=card><h3>Biểu đồ Phân bố log(Giá)</h3><canvas id=logChart height=220></canvas></div>
+ <div class=card><h3>Biểu đồ Phân bố diện tích bất động sản</h3><canvas id=areaChart height=220></canvas></div>
+ <div class=card><h3>Biểu đồ Trung vị và khoảng tứ phân vị giá nhà</h3><canvas id=priceMedianChart height=220></canvas><div id=priceStatText class=note></div></div>
+ <div class=card><h3>Biểu đồ Trung vị và khoảng tứ phân vị diện tích</h3><canvas id=areaMedianChart height=220></canvas><div id=areaStatText class=note></div></div>
+ <div class=card><h3>Biểu đồ Mối quan hệ giữa diện tích và giá nhà</h3><canvas id=scatterChart height=220></canvas></div>
+</div>
+<div class=card><h3>Heatmap ma trận tương quan</h3><div id=heatmap class=tablewrap></div></div>
+<div class=grid>
+ <div class=card><h3>Biểu đồTrung vị đơn giá theo quận/huyện</h3><canvas id=distChart height=250></canvas></div>
+</div></section>
+<section id=model class=panel hidden><div class=card><h2>4. Xây dựng mô hình hồi quy tuyến tính đa biến</h2><p><b>Biến phụ thuộc:</b> log(Price_ty). Hệ thống luôn lấy log của giá bán trước khi hồi quy.</p><p><b>Biến số:</b> log_Area, Bedrooms_n, Bathrooms_n, Floors_n.</p><p><b>Biến đầu vào:</b> hệ thống giữ các đặc trưng chuẩn hóa của bài toán giá nhà và đồng thời tự xem xét các cột bổ sung trong file. Cột số phù hợp được dùng trực tiếp; cột phân loại được One-Hot Encoding. Cột hằng, ID/text có quá nhiều giá trị và biến gây rò rỉ từ giá được loại tự động.</p><div id=featureInfo class=note></div><div class=table-title>Cấu hình mô hình: Cấu hình dữ liệu huấn luyện và kiểm tra</div><table><tr><th>Nội dung</th><th>Giá trị</th></tr><tr><td>Tỷ lệ huấn luyện</td><td>80%</td></tr><tr><td>Tỷ lệ kiểm tra</td><td>20%</td></tr><tr><td>random_state</td><td>42</td></tr><tr><td>Mô hình</td><td>Multiple Linear Regression</td></tr><tr><td>Biến mục tiêu</td><td>log(Price_ty)</td></tr></table></div></section>
+<section id=result class=panel hidden><div class=card><h2>5. Kết quả và đánh giá mô hình</h2><p class=note>R² và các chỉ số sai số chỉ xuất hiện sau khi hoàn thành tiền xử lý và huấn luyện mô hình.</p><div id=metrics></div></div></section>
+<section id=predict class=panel hidden><div class=grid><div class=card><h2>6. Dự báo giá nhà</h2><div id=pform></div><button class=primary onclick=predictNow()>Dự báo giá</button></div><div class=result><div>GIÁ NHÀ ƯỚC LƯỢNG</div><div id=pprice class=price>—</div><div id=ppm></div><div id=range class=small></div></div></div></section>
+</main>
+<script>
+let S=null;const esc=x=>String(x??'').replace(/&/g,'&amp;').replace(/</g,'&lt;');const fmt=(x,d=2)=>Number(x).toLocaleString('vi-VN',{maximumFractionDigits:d});
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.p));function show(id){document.querySelectorAll('.panel').forEach(x=>x.hidden=x.id!==id);document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x.dataset.p===id))}
+async function api(u,o){let r=await fetch(u,o),t=await r.text(),j;try{j=JSON.parse(t)}catch{throw Error(`HTTP ${r.status}: ${t.slice(0,300)}`)}if(!r.ok)throw Error(j.detail||'Lỗi');return j}
+let REVIEW=null;
+async function upload(){
+ const f=file.files[0];if(!f){msg.textContent='Hãy chọn tệp CSV.';return}
+ msg.textContent='Đang đọc tệp để kiểm tra...';const fd=new FormData();fd.append('file',f);
+ try{REVIEW=await api('/api/upload',{method:'POST',body:fd});msg.textContent=REVIEW.message;renderReview(REVIEW)}catch(e){msg.textContent=e.message}
+}
+function renderReview(r){
+ csvReview=document.getElementById('csv-review');csvReview.style.display='block';
+ document.getElementById('review-meta').innerHTML=`<b>${esc(r.filename)}</b> · ${Number(r.rows).toLocaleString('vi-VN')} bản ghi · ${r.columns.length} cột`;
+ document.getElementById('review-suggestions').innerHTML=(r.suggestions||[]).map(x=>`<div class="review-tip ${x.level||''}"><b>${esc(x.column||'Dữ liệu')}:</b> ${esc(x.message)}</div>`).join('')||'<div class=note>Chưa phát hiện cảnh báo đáng chú ý.</div>';
+ let head='<tr><th>#</th>'+r.columns.map(c=>`<th><input class="colname" data-old="${esc(c)}" value="${esc(c)}"><label class="dropcol"><input type=checkbox data-drop="${esc(c)}"> bỏ cột</label></th>`).join('')+'</tr>';
+ let body=(r.preview||[]).map((row,ri)=>'<tr><td>'+(ri+1)+'</td>'+r.columns.map(c=>`<td contenteditable="true" data-row="${ri}" data-col="${esc(c)}">${esc(row[c])}</td>`).join('')+'</tr>').join('');
+ document.getElementById('review-table').innerHTML='<thead>'+head+'</thead><tbody>'+body+'</tbody>';
+}
+async function confirmReview(){
+ if(!REVIEW)return;const renames={},drops=[],edits=[];
+ document.querySelectorAll('.colname').forEach(x=>{if(x.value.trim()&&x.value.trim()!=x.dataset.old)renames[x.dataset.old]=x.value.trim()});
+ document.querySelectorAll('[data-drop]').forEach(x=>{if(x.checked)drops.push(x.dataset.drop)});
+ document.querySelectorAll('#review-table td[contenteditable]').forEach(td=>{let old=REVIEW.preview[Number(td.dataset.row)]?.[td.dataset.col],now=td.textContent;if(String(old??'')!==String(now??''))edits.push({row:Number(td.dataset.row),column:td.dataset.col,value:now})});
+ msg.textContent='Đang xử lý và huấn luyện mô hình...';
+ try{S=await api('/api/confirm-upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:REVIEW.filename,renames,drop_columns:drops,edits})});msg.textContent='Đã xác nhận và huấn luyện mô hình.';document.getElementById('csv-review').style.display='none';REVIEW=null;render()}catch(e){msg.textContent=e.message}
+}
+function cancelReview(){REVIEW=null;document.getElementById('csv-review').style.display='none';msg.textContent='Đã bỏ tệp đang kiểm tra. Mô hình hiện tại không thay đổi.'}
+
+async function resetDefault(){msg.textContent='Đang nạp lại dữ liệu mặc định...';try{S=await api('/api/reset-default',{method:'POST'});msg.textContent='Đã dùng lại dữ liệu mặc định.';render();}catch(e){msg.textContent=e.message}}
+async function initDefault(){try{S=await api('/api/state');msg.textContent='Đang dùng dữ liệu mặc định. Có thể vào Dự báo ngay.';render();}catch(e){msg.textContent=e.message}}
+window.addEventListener('DOMContentLoaded',initDefault);
+
+function tbl(rows){if(!rows||!rows.length)return'';let ks=Object.keys(rows[0]);return `<div class=tablewrap><table><tr>${ks.map(k=>`<th>${esc(k)}</th>`).join('')}</tr>${rows.map(r=>`<tr>${ks.map(k=>`<td>${esc(r[k])}</td>`).join('')}</tr>`).join('')}</table></div>`}
+function render(){surveyInfo.innerHTML=`<div class=card><div class=table-title>Bảng 1.1. Thông tin tổng quan dữ liệu thô</div><div class=kpis><div class=kpi>Số bản ghi<b>${S.raw_rows.toLocaleString('vi-VN')}</b></div><div class=kpi>Số thuộc tính<b>${S.raw_cols}</b></div><div class=kpi>Dữ liệu sạch<b>${S.clean_rows.toLocaleString('vi-VN')}</b></div><div class=kpi>Số dòng bị loại<b>${(S.raw_rows-S.clean_rows).toLocaleString('vi-VN')}</b></div></div></div>`;
+retentionInfo.innerHTML=`<div class=card><h2>Data Retention Report</h2><div class=metrics><div class=metric><b>${S.retention.raw.toLocaleString()}</b>Dòng ban đầu</div><div class=metric><b>${S.retention.clean.toLocaleString()}</b>Dòng sau xử lý</div><div class=metric><b>${S.retention.kept_pct}%</b>Tỷ lệ giữ lại</div><div class=metric><b>${S.retention.removed.toLocaleString()}</b>Dòng đã loại</div></div></div>`;
+intelInfo.innerHTML=`<div class=card><h2>Nhận diện cấu trúc dữ liệu</h2><p class=note>Hệ thống kết hợp tên cột, alias, độ tương đồng tên, kiểu dữ liệu và phân phối để xác định vai trò. Confidence thấp không làm cột bị loại; cột vẫn được xử lý theo data role.</p><div class=table-title>Bảng nhận diện cột dữ liệu</div>${tbl((S.intelligence||[]).map(x=>({"Cột":x.column,"Vai trò":x.semantic,"Kiểu":x.data_role,"Tin cậy":x.confidence+"%","Missing":x.missing,"Unique":x.unique,"Median":x.median==null?"—":fmt(x.median,2),"Xử lý":x.model_action})))}</div>`;
+steps.innerHTML=(S.steps||[]).map((x,i)=>`<div class="card step"><h3>${esc(x.title)}</h3><p>${esc(x.note)}</p>${(x.table||[]).length?tbl(x.table):`<table><tr><th>Trước xử lý</th><th>Sau xử lý</th><th>Số dòng loại</th></tr><tr><td>${x.before}</td><td>${x.after}</td><td>${x.removed}</td></tr></table>`}</div>`).join('');
+featureInfo.textContent=`Số cột sau làm sạch: ${S.clean_cols}. Các cột phù hợp được backend tự đưa vào mô hình; không giới hạn số cột file đầu vào.`; renderEDA().catch(e=>console.warn('EDA:',e)); let m=S.metrics;metrics.innerHTML=`<div class=table-title>Kết quả đánh giá: Kết quả đánh giá mô hình trên tập kiểm tra</div><table class=metric-table><tr><th>Chỉ số</th><th>Kết quả</th><th>Ý nghĩa</th></tr><tr><td>R² trên thang log</td><td>${fmt(m.r2_log,4)}</td><td>Mức độ giải thích biến thiên của log(Giá)</td></tr><tr><td>R² trên thang giá</td><td>${fmt(m.r2_price,4)}</td><td>Mức độ giải thích trên giá quy đổi về tỷ VNĐ</td></tr><tr><td>MAE</td><td>${fmt(m.mae,3)} tỷ</td><td>Sai số tuyệt đối trung bình</td></tr><tr><td>RMSE</td><td>${fmt(m.rmse,3)} tỷ</td><td>Căn bậc hai sai số bình phương trung bình</td></tr><tr><td>MAPE</td><td>${fmt(m.mape,2)}%</td><td>Sai số phần trăm tuyệt đối trung bình</td></tr><tr><td>Train / Test</td><td>${m.train} / ${m.test}</td><td>Chia dữ liệu 80/20</td></tr></table>`;
+let L=S.levels||{},M=S.medians||{},op=a=>(a||[]).map(v=>`<option>${esc(v)}</option>`).join('');
+let parts=[];
+if(L.District)parts.push(`<label>Quận/huyện</label><select id=d>${op(L.District)}</select>`);
+if(L.PropertyType)parts.push(`<label>Loại hình BĐS</label><select id=t>${op(L.PropertyType)}</select>`);
+if(M.Area_m2!=null)parts.push(`<label>Diện tích (m²)</label><input id=a type=number value="${M.Area_m2}">`);
+if(M.Bedrooms_n!=null)parts.push(`<label>Số phòng ngủ</label><input id=b type=number value="${M.Bedrooms_n}">`);
+if(M.Bathrooms_n!=null)parts.push(`<label>Số phòng tắm</label><input id=ba type=number value="${M.Bathrooms_n}">`);
+if(M.Floors_n!=null)parts.push(`<div id=floorWrap><label>Số tầng</label><input id=fl type=number value="${M.Floors_n}"><div id=floorHint class=note></div></div>`);
+if(L.Legal_cat)parts.push(`<label>Pháp lý</label><select id=l>${op(L.Legal_cat)}</select>`);
+if(L.Interior_cat)parts.push(`<label>Nội thất</label><select id=i>${op(L.Interior_cat)}</select>`);
+if(L.Direction_cat)parts.push(`<label>Hướng</label><select id=di>${op(L.Direction_cat)}</select>`);
+pform.innerHTML=parts.join('')+`<p class=note>Các biến bổ sung trong file được mô hình tự sử dụng với giá trị trung vị/mode khi dự báo.</p>`;
+function syncFloor(){
+  if(!window.fl||!window.t)return;
+  let pt=(window.t.value||'').toLowerCase();
+  let auto=pt.includes('căn hộ')||pt.includes('chung cư')||pt.includes('condotel');
+  window.fl.disabled=auto;
+  window.fl.dataset.auto=auto?'1':'0';
+  if(window.floorHint)floorHint.textContent=auto?'Tự động dùng trung vị số tầng của loại hình này trong dữ liệu huấn luyện.':'Nhập số tầng của bất động sản.';
+}
+if(window.t){window.t.addEventListener('change',syncFloor);syncFloor()}
+}
+async function predictNow(){try{let x={District:window.d?.value||"",PropertyType:window.t?.value||"",Area_m2:+(window.a?.value||1),Bedrooms_n:+(window.b?.value||0),Bathrooms_n:+(window.ba?.value||0),Floors_n:(window.fl?.dataset.auto==='1'?null:+(window.fl?.value||0)),Legal_cat:window.l?.value||"",Interior_cat:window.i?.value||"",Direction_cat:window.di?.value||""};let p=await api('/api/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(x)});pprice.textContent=fmt(p.price,2)+' tỷ VNĐ';ppm.textContent=fmt(p.ppm,0)+' triệu đồng/m²';range.textContent='Khoảng dự báo 80%: '+fmt(p.lo,2)+' – '+fmt(p.hi,2)+' tỷ VNĐ';
+if(p.floors_source==='median_by_property_type'&&p.floors_used!=null)range.textContent+=' • Số tầng tự động: '+fmt(p.floors_used,1);
+if((p.warnings||[]).length)range.textContent+=' • ⚠ '+p.warnings.join(' ')}catch(e){range.textContent=e.message}}
+
+</script></body></html>
